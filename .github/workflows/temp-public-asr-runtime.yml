@@ -23,7 +23,7 @@ jobs:
           COMMAND="$(tr -d '[:space:]' < .github/asr-runtime-command.txt)"
           echo "command=$COMMAND" >> "$GITHUB_OUTPUT"
       - name: Build public runtime packages
-        if: steps.command.outputs.command == 'create'
+        if: steps.command.outputs.command == 'artifact'
         shell: bash
         run: |
           set -euo pipefail
@@ -45,21 +45,29 @@ jobs:
           (cd transfer && zip -0 -q -r ../faster-whisper-py313-wheels.zip wheels)
           (cd transfer && zip -0 -q -r ../faster-whisper-small-en-model.zip model)
           sha256sum faster-whisper-py313-wheels.zip faster-whisper-small-en-model.zip > TRANSFER_SHA256SUMS
-      - name: Publish temporary public release
-        if: steps.command.outputs.command == 'create'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: temp-public-asr-runtime-20260915
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh release delete "$TAG" --yes --cleanup-tag || true
-          gh release create "$TAG" \
-            faster-whisper-py313-wheels.zip \
-            faster-whisper-small-en-model.zip \
-            TRANSFER_SHA256SUMS \
-            --title "Temporary public ASR runtime" \
-            --notes "Public open-source runtime/model only. No user data. Delete immediately after transfer."
+      - name: Upload wheels artifact
+        if: steps.command.outputs.command == 'artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: temporary-faster-whisper-py313-wheels
+          path: faster-whisper-py313-wheels.zip
+          compression-level: 0
+          retention-days: 1
+      - name: Upload model artifact
+        if: steps.command.outputs.command == 'artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: temporary-faster-whisper-small-en-model
+          path: faster-whisper-small-en-model.zip
+          compression-level: 0
+          retention-days: 1
+      - name: Upload checksums artifact
+        if: steps.command.outputs.command == 'artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: temporary-asr-transfer-checksums
+          path: TRANSFER_SHA256SUMS
+          retention-days: 1
       - name: Delete temporary public release
         if: steps.command.outputs.command == 'delete'
         env:
