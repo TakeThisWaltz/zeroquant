@@ -1,0 +1,71 @@
+name: Temporary public ASR runtime transfer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/asr-runtime-command.txt'
+      - '.github/workflows/temp-public-asr-runtime.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  transfer:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read command
+        id: command
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMAND="$(tr -d '[:space:]' < .github/asr-runtime-command.txt)"
+          echo "command=$COMMAND" >> "$GITHUB_OUTPUT"
+      - name: Build public runtime packages
+        if: steps.command.outputs.command == 'create'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p transfer/wheels transfer/model
+          python3 -m pip install --upgrade pip
+          python3 -m pip download --dest transfer/wheels --only-binary=:all: \
+            --python-version 313 --implementation cp --abi cp313 \
+            --platform manylinux2014_x86_64 \
+            --platform manylinux_2_28_x86_64 \
+            --platform manylinux_2_27_x86_64 \
+            faster-whisper==1.2.1
+          for FILE in model.bin config.json tokenizer.json vocabulary.txt; do
+            curl --fail --location --retry 2 --max-time 300 \
+              "https://huggingface.co/Systran/faster-whisper-small.en/resolve/main/${FILE}" \
+              -o "transfer/model/${FILE}"
+          done
+          (cd transfer/wheels && sha256sum * > SHA256SUMS)
+          (cd transfer/model && sha256sum * > SHA256SUMS)
+          (cd transfer && zip -0 -q -r ../faster-whisper-py313-wheels.zip wheels)
+          (cd transfer && zip -0 -q -r ../faster-whisper-small-en-model.zip model)
+          sha256sum faster-whisper-py313-wheels.zip faster-whisper-small-en-model.zip > TRANSFER_SHA256SUMS
+      - name: Publish temporary public release
+        if: steps.command.outputs.command == 'create'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: temp-public-asr-runtime-20260915
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release delete "$TAG" --yes --cleanup-tag || true
+          gh release create "$TAG" \
+            faster-whisper-py313-wheels.zip \
+            faster-whisper-small-en-model.zip \
+            TRANSFER_SHA256SUMS \
+            --title "Temporary public ASR runtime" \
+            --notes "Public open-source runtime/model only. No user data. Delete immediately after transfer."
+      - name: Delete temporary public release
+        if: steps.command.outputs.command == 'delete'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: temp-public-asr-runtime-20260915
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release delete "$TAG" --yes --cleanup-tag || true
